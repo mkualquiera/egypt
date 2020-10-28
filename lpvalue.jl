@@ -10,6 +10,7 @@ Base.one(::Type{LPValue}) = LPValue(1)
 Base.zero(::Type{LPValue}) = LPValue(0)
 Base.zero(::LPValue) = LPValue(0)
 Base.convert(::Type{Number},x::LPValue) = x.m*100000+x.n
+Base.transpose(x::String) = x
 
 function Base.isless(x::LPValue,y::LPValue)
     if x.m != y.m 
