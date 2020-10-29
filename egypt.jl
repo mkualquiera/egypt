@@ -25,12 +25,27 @@ function findnewbase(X, VB, Cp, Ap, bp)
     return VB[exitingid] => X[enteringid]
 end
 
-function solvesimplex(X,C,A,b,VB,logger)
+
+function finddualbase(X, VB, Cp, Ap, bp)
+    acceptableexitings = filter(x->x<0,bp)
+    possibleexitings = findall(x->x<0&&abs(x)==max(abs.(acceptableexitings)...),bp)
+    if length(possibleexitings) == 0 return :solved end
+    exitingid = possibleexitings[1][1]
+    reasons = ((x,y)->y < 0 ? x/y : 1).(Cp, transpose(Ap[exitingid,:]))
+    acceptablereasons = filter(x->x<0, reasons)
+    if length(acceptablereasons) == 0 return :unbounded end
+    possibleenterings = findall(x->abs(x)==min(abs.(acceptablereasons)...),
+        reasons)
+    enteringid = possibleenterings[1][2]
+    return VB[exitingid] => X[enteringid]
+end
+
+function solvesimplex(X,C,A,b,VB,logger,basemethod)
     Cp, Z, Ap, bp = solutionofbase(X,C,A,b,VB)
     status = :starting
     logger(X,C,A,b,VB,Cp,Z,Ap,bp,status)
     while true
-        status = findnewbase(X,VB,Cp,Ap,bp)
+        status = basemethod(X,VB,Cp,Ap,bp)
         if status == :unbounded || status == :solved break end
         VB = replace(VB,status)
         Cp, Z, Ap, bp = solutionofbase(X,C,A,b,VB)
@@ -63,10 +78,22 @@ function standardizerestriction(X,C,A,R,i)
     return nX, nC, nA, nR
 end
 
-function solveproblem(D,C,A,R,b,CR,twophases)
+function solveproblem(D,C,A,R,b,CR,twophases,dual)
     X = [ "X"*string(i) for j=[ 1 ], i=1:size(C)[2] ]
-    if D == "min"
+    basemethod = findnewbase
+    inverted = false
+    if !dual
+        if D == "min"
+            C *= -1
+            inverted = true
+        end
+    else
         C *= -1
+        A *= -1
+        b *= -1
+        R = map(x->x==">=" ? "<=" : (x=="=" ? "=" : ">="),R)
+        basemethod = finddualbase
+        inverted = true
     end
     for i in 1:size(A)[1]
         X, C, A, R = standardizerestriction(X, C, A, R, i)
@@ -77,7 +104,7 @@ function solveproblem(D,C,A,R,b,CR,twophases)
     function logger(x,c,a,b,vb,cp,z,ap,bp,status)
         println(status)
         names = hcat([ "Z" ], x, "ld")
-        funcobj = hcat([ 1 ], cp, z)
+        funcobj = hcat([ inverted ? -1 : 1 ], cp, z)
         li = transpose(vb)
         lower = hcat(li, ap, bp)
         final = vcat(names, funcobj, lower)
@@ -86,15 +113,16 @@ function solveproblem(D,C,A,R,b,CR,twophases)
     end
     if twophases
         firstphasec = map(x->x[1]=='A' ? -1 : 0,X)
-        firstsolution = solvesimplex(X, firstphasec, A, b, VB, logger)[1]
+        firstsolution = solvesimplex(X, firstphasec, A, b, VB, logger, 
+            basemethod)[1]
         artificialindices = map(y->y[2],findall(x->x[1]=='A',X))
         newindices = transpose(filter(x->!(x in artificialindices), 
             collect(1:size(A)[2])))
         X = hcat([X[i] for j = [ 1 ], i=newindices]...)
         A = hcat([A[:,i] for j = [ 1 ], i=newindices]...)
         C = hcat([C[i] for j = [ 1 ], i=newindices]...)
-        solvesimplex(X, C, A, b, firstsolution, logger)
+        solvesimplex(X, C, A, b, firstsolution, logger, basemethod)
     else
-        solvesimplex(X, C, A, b, VB, logger)
+        solvesimplex(X, C, A, b, VB, logger, basemethod)
     end
 end
